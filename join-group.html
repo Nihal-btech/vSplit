@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join Group - vSplit</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h2>Join a Group</h2>
+    <label for="group-code">Group Code</label>
+    <input type="text" id="group-code" placeholder="Enter group code" required>
+    <button id="join-group-btn">Join Group</button>
+  </div>
+
+  <script type="module">
+    import { db } from './firebase-config.js';
+    import { doc, getDoc, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const currentUser = sessionStorage.getItem("currentUser");
+
+    document.getElementById("join-group-btn").addEventListener("click", async () => {
+      const groupCode = document.getElementById("group-code").value.trim().toUpperCase();
+      if (!groupCode) return alert("Enter a group code.");
+
+      const groupRef = doc(db, "groups", groupCode);
+      const groupSnap = await getDoc(groupRef);
+
+      if (!groupSnap.exists()) {
+        alert("Group not found.");
+        return;
+      }
+
+      await updateDoc(groupRef, {
+        members: arrayUnion(currentUser)
+      });
+
+      sessionStorage.setItem("groupId", groupCode);
+      window.location.href = "group-details.html";
+    });
+  </script>
+</body>
+</html>

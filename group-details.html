@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Group Details - vSplit</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <h2 id="group-name">Group: </h2>
+    <p id="group-code">Group Code: </p>
+
+    <h3>Members</h3>
+    <ul id="member-list"></ul>
+
+    <button id="start-btn" style="display: none;">Start Bill Split</button>
+  </div>
+
+  <!-- Firestore + Your Script -->
+  <script type="module">
+    import { db } from './firebase-config.js';
+    import { doc, onSnapshot, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const groupId = sessionStorage.getItem("groupId");
+    const currentUser = sessionStorage.getItem("currentUser");
+
+    if (!groupId || !currentUser) {
+      alert("Missing session data. Please login again.");
+      window.location.href = "login.html";
+    }
+
+    const groupNameEl = document.getElementById("group-name");
+    const groupCodeEl = document.getElementById("group-code");
+    const memberListEl = document.getElementById("member-list");
+    const startBtn = document.getElementById("start-btn");
+
+    const groupRef = doc(db, "groups", groupId);
+
+    // Real-time Firestore listener
+    onSnapshot(groupRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+
+        groupNameEl.textContent = `Group: ${data.groupName}`;
+        groupCodeEl.textContent = `Group Code: ${data.groupCode}`;
+
+        memberListEl.innerHTML = "";
+        (data.members || []).forEach(member => {
+          const li = document.createElement("li");
+          li.textContent = member;
+          memberListEl.appendChild(li);
+        });
+
+        // Show start button only for the admin
+        if (currentUser === data.createdBy) {
+          startBtn.style.display = "block";
+        }
+
+        // Redirect to bill-split.html when started
+        if (data.started === true) {
+          console.log("Redirecting to bill-split.html...");
+          window.location.href = "bill-split.html";
+        }
+
+      } else {
+        alert("Group not found.");
+        window.location.href = "login.html";
+      }
+    });
+
+    // Start bill split button handler
+    startBtn.addEventListener("click", async () => {
+      try {
+        await updateDoc(groupRef, {
+          started: true
+        });
+        console.log("Group marked as started in Firestore.");
+      } catch (error) {
+        console.error("Error updating Firestore:", error);
+        alert("Failed to start the bill split.");
+      }
+    });
+  </script>
+</body>
+</html>

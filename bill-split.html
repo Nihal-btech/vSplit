@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>vSplit - Bill Split</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: linear-gradient(to right, #16a085, #27ae60);
+      color: #fff;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+    }
+
+    .container {
+      background: #2c3e50;
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+      width: 90%;
+      max-width: 900px;
+    }
+
+    h1, h3 {
+      text-align: center;
+    }
+
+    input[type="file"], input[type="number"], input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      margin: 10px 0;
+    }
+
+    button {
+      padding: 10px 20px;
+      background: #1abc9c;
+      border: none;
+      color: white;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      margin-bottom: 20px;
+    }
+
+    .person-tag {
+      background: #1abc9c;
+      border-radius: 16px;
+      padding: 6px 12px;
+      margin: 4px;
+      display: inline-block;
+    }
+
+    ul { list-style: none; padding: 0; }
+    li { background: #34495e; padding: 12px; border-radius: 8px; margin-bottom: 8px; }
+
+    canvas { margin-top: 8px; }
+
+    .preview-img {
+      width: 250px;
+      height: auto;
+      border-radius: 8px;
+      margin-top: 10px;
+      margin-left: 250px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>vSplit Bill Splitter</h1>
+
+  <div id="adminSection" style="display:none;">
+    <input type="file" id="billUpload" accept="image/*" />
+    <button id="uploadBtn">Extract & Upload Bill</button>
+    <img id="billPreview" class="preview-img" src="" alt="Bill preview" />
+    <label for="adminUpi">Your UPI ID:</label>
+    <input type="text" id="adminUpi" placeholder="example@upi" />
+    <button id="saveUpi">Save UPI</button>
+  </div>
+
+  <h3>Group Members</h3>
+  <div id="personList"></div>
+
+  <div id="output"></div>
+</div>
+
+<script type="module">
+  import { db } from './firebase-config.js';
+  import {
+    doc, updateDoc, onSnapshot
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const groupId = sessionStorage.getItem("groupId");
+  const currentUser = sessionStorage.getItem("currentUser");
+  const groupRef = doc(db, "groups", groupId);
+
+  let items = [], members = [], paidStatus = {}, adminUPI = "";
+
+  const personList = document.getElementById("personList");
+  const output = document.getElementById("output");
+  const adminSection = document.getElementById("adminSection");
+
+  const adminUpiInput = document.getElementById("adminUpi");
+
+  onSnapshot(groupRef, (snap) => {
+    if (!snap.exists()) return;
+    const data = snap.data();
+
+    members = data.members || [];
+    adminUPI = data.adminUPI || "admin@upi";
+    adminUpiInput.value = adminUPI;
+
+    paidStatus = data.paidStatus || {};
+    items = data.items || [];
+
+    personList.innerHTML = members.map(m => `<span class="person-tag">${m}</span>`).join('');
+
+    if (currentUser === data.createdBy) adminSection.style.display = 'block';
+    else adminSection.style.display = 'none';
+
+    renderItems();
+  });
+
+  document.getElementById("uploadBtn").onclick = () => {
+    const fileInput = document.getElementById("billUpload");
+    const file = fileInput.files[0];
+    if (!file) return alert("Upload a bill image");
+
+    const reader = new FileReader();
+    reader.onload = e => {
+      document.getElementById("billPreview").src = e.target.result;
+      Tesseract.recognize(e.target.result, 'eng').then(({ data: { text } }) => {
+        const lines = text.split('\n');
+        const parsed = parseItems(lines);
+        updateDoc(groupRef, { items: parsed });
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  document.getElementById("saveUpi").onclick = () => {
+    const upi = adminUpiInput.value.trim();
+    if (upi) updateDoc(groupRef, { adminUPI: upi });
+  };
+
+  function parseItems(lines) {
+    const skip = ["total", "gst", "tax", "thank", "date"];
+    const result = [];
+    lines.forEach(line => {
+      const clean = line.toLowerCase().replace(/[|₹,]/g, '').trim();
+      if (skip.some(s => clean.includes(s))) return;
+      const parts = clean.split(/\s+/);
+      if (parts.length >= 4) {
+        const total = parseFloat(parts.pop());
+        const rate = parseFloat(parts.pop());
+        const qty = parseInt(parts.pop());
+        const name = parts.join(' ');
+        if (!isNaN(qty) && !isNaN(rate) && !isNaN(total)) {
+          result.push({ name, qty, rate, total, assigned: [] });
+        }
+      }
+    });
+    return result;
+  }
+
+  function renderItems() {
+    let html = '<h3>Select Your Items</h3><ul>';
+    items.forEach((item, i) => {
+      const usedQty = item.assigned.reduce((sum, e) => sum + e.qty, 0);
+      const leftQty = item.qty - usedQty + (item.assigned.find(a => a.person === currentUser)?.qty || 0);
+      const mine = item.assigned.find(a => a.person === currentUser)?.qty || 0;
+      html += `
+        <li>
+          <strong>${item.name}</strong> - ₹${item.rate.toFixed(2)} × ${item.qty}
+          <br>
+          Available: ${leftQty}
+          <br>
+          Your qty:
+          <input type="number" min="0" max="${leftQty}" value="${mine}" onchange="assignQty(${i}, this.value)">
+        </li>`;
+    });
+    html += '</ul><h3>Split Summary</h3><div id="splitSummary"></div>';
+    output.innerHTML = html;
+    calculateSplit();
+  }
+
+  window.assignQty = async (index, qty) => {
+    qty = parseInt(qty) || 0;
+    // Clone the item list to avoid mutating directly
+    const updatedItems = JSON.parse(JSON.stringify(items));
+    const currentItem = updatedItems[index];
+    // Remove current user's previous assignment if it exists
+    currentItem.assigned = currentItem.assigned.filter(a => a.person !== currentUser);
+    // Calculate how many items are already assigned to others
+    const alreadyAssignedQty = currentItem.assigned.reduce((sum, a) => sum + a.qty, 0);
+    const maxAvailable = currentItem.qty - alreadyAssignedQty;
+    if (qty > maxAvailable) {
+      alert(`Only ${maxAvailable} items left for "${currentItem.name}".`);
+      return;
+    }
+    // Add new assignment
+    if (qty > 0) {
+      currentItem.assigned.push({ person: currentUser, qty });
+    }
+    await updateDoc(groupRef, { items: updatedItems });
+  };
+
+
+  async function togglePaid(user) {
+    paidStatus[user] = !paidStatus[user];
+    await updateDoc(groupRef, { paidStatus });
+  }
+
+  function calculateSplit() {
+  const split = {};
+  let totalReceived = 0;
+
+  const isAdmin = currentUser === members[0]; // Assuming first member is admin
+  // OR: use 'createdBy' from snapshot if available
+
+  items.forEach(item => {
+    item.assigned.forEach(entry => {
+      if (entry.qty > 0) {
+        split[entry.person] = (split[entry.person] || 0) + entry.qty * item.rate;
+      }
+    });
+  });
+
+  let html = '';
+  for (const [user, amt] of Object.entries(split)) {
+    const upiLink = `upi://pay?pa=${adminUPI}&pn=${user}&am=${amt.toFixed(2)}&cu=INR`;
+    const checked = paidStatus[user] ? 'checked' : '';
+    if (paidStatus[user]) totalReceived += amt;
+
+    const checkbox = isAdmin
+      ? `<input type="checkbox" onchange="togglePaid('${user}')" ${checked}>`
+      : `<input type="checkbox" ${checked} disabled>`;
+
+    html += `
+      <p>
+        <strong>${user}</strong>: ₹${amt.toFixed(2)}
+        <label>${checkbox} Paid</label>
+        <br>
+        <canvas id="qr-${user}"></canvas>
+      </p>`;
+
+    setTimeout(() => {
+      QRCode.toCanvas(document.getElementById(`qr-${user}`), upiLink, { width: 128 });
+    }, 100);
+  }
+
+  html += `<hr><h3>Total Received: ₹${totalReceived.toFixed(2)}</h3>`;
+  document.getElementById("splitSummary").innerHTML = html;
+}
+
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.1/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+</body>
+</html>

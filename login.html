@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Login - vSplit</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>Welcome to vSplit</h1>
+
+    <label for="name">Enter Your Name</label>
+    <input type="text" id="name" placeholder="Your name" required>
+
+    <label>Select Your Role</label>
+    <div class="role-selection">
+      <label><input type="radio" name="role" value="admin" required> Admin</label>
+      <label><input type="radio" name="role" value="member" required> Member</label>
+    </div>
+
+    <button id="continue-btn">Continue</button>
+  </div>
+
+  <script type="module">
+    import './firebase-config.js'; // Needed to initialize Firebase
+
+    document.getElementById("continue-btn").addEventListener("click", () => {
+      const name = document.getElementById("name").value.trim();
+      const role = document.querySelector('input[name="role"]:checked')?.value;
+
+      if (!name || !role) {
+        alert("Please enter your name and select a role.");
+        return;
+      }
+
+      sessionStorage.setItem("currentUser", name);
+      sessionStorage.setItem("role", role);
+
+      if (role === "admin") {
+        window.location.href = "create-group.html";
+      } else {
+        window.location.href = "join-group.html";
+      }
+    });
+  </script>
+</body>
+</html>
